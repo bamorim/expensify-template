@@ -13,5 +13,12 @@ services:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    restart: unless-stopped
+
 volumes:
   postgres-data:
