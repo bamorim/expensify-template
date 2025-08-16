@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the technical architecture of the Expensify application, built using the T3 Stack with Next.js, TypeScript, Prisma, and Vitest.
+This document outlines the technical architecture of the Expensify application, built using the T3 Stack with Next.js, TypeScript, Prisma, tRPC, NextAuth, and Vitest.
 
 ## Technology Stack
 
@@ -11,6 +11,8 @@ This document outlines the technical architecture of the Expensify application, 
 - **Next.js** - React framework with App Router
 - **TypeScript** - Type-safe JavaScript
 - **Prisma** - Database ORM with PostgreSQL
+- **tRPC** - End-to-end typesafe APIs with TanStack Query integration
+- **NextAuth** - Authentication framework for Next.js
 - **Tailwind CSS** - Utility-first CSS framework
 - **Zod** - Schema validation and type inference
 
@@ -18,122 +20,202 @@ This document outlines the technical architecture of the Expensify application, 
 
 - **ESLint** - Code linting
 - **Prettier** - Code formatting
-- **Vitest** - Unit testing framework
+- **Vitest** - Unit testing framework with multi-environment setup
 - **pnpm** - Package manager
 
-## Service Architecture
+## Client-Server Architecture
 
-### Domain-Driven Service Structure
+### tRPC Integration
 
-The application follows a domain-driven design pattern with clear service boundaries. Each service is organized in its own directory under `src/server/`:
+The application uses tRPC to create a type-safe interface between client and server. This eliminates the need for manual API type definitions and provides end-to-end type safety.
+
+#### Server-Side Structure
 
 ```
 src/server/
-├── db.ts                   # Database connection and configuration
-├── services/               # Domain-driven design services
-│   ├── example/
-│   │   ├── index.ts        # Service implementation
-│   │   └── index.test.ts   # Service tests
-│   └── [other-services]/
-│       ├── index.ts
-│       └── index.test.ts
+├── api/
+│   ├── root.ts              # Main tRPC router
+│   ├── trpc.ts              # tRPC configuration and middleware
+│   └── routers/             # Domain-specific routers with business logic
+│       ├── post.ts          # Post-related procedures and logic
+│       └── [other-routers]/
+├── auth/                    # NextAuth configuration
+│   ├── index.ts            # Auth exports
+│   └── config.ts           # Auth configuration
+├── db/                     # Database configuration
+│   ├── index.ts            # Prisma client
+│   └── __mocks__/          # Test database mocks
 ```
 
-### Service Implementation Pattern
+#### Client-Side Integration
 
-Services follow a consistent pattern:
+The client uses TanStack Query (React Query) for state management and caching:
 
 ```typescript
-import { db } from "~/server/db";
-import type { PrismaClient } from "@prisma/client";
+// src/trpc/react.tsx
+export const api = createTRPCReact<AppRouter>();
 
-class ExampleService {
-  constructor(private readonly prisma: PrismaClient) {}
-
-  async getExample() {
-    return await this.prisma.$queryRaw<
-      [{ id: string }]
-    >`SELECT gen_random_uuid() AS id`;
-  }
-}
-
-const exampleService = new ExampleService(db);
-export { exampleService, ExampleService };
+// Usage in components
+const { data, isLoading } = api.post.all.useQuery();
+const createPost = api.post.create.useMutation();
 ```
 
-**Key Benefits:**
+### NextAuth Authentication
 
-- **Dependency Injection**: Services receive Prisma client as dependency
-- **Testability**: Easy to mock dependencies for unit tests
-- **Type Safety**: Full TypeScript support with Prisma types
-- **Singleton Pattern**: Single service instance exported for reuse
+NextAuth provides authentication with session management integrated into the tRPC context:
+
+```typescript
+// Server context includes session
+export const createTRPCContext = async (opts: { headers: Headers }) => {
+  const session = await auth();
+  return { db, session, ...opts };
+};
+
+// Protected procedures can access session
+const protectedProcedure = t.procedure.use(enforceUserIsAuthed);
+```
+
+## Business Logic Organization
+
+### tRPC Router Pattern
+
+Business logic is organized directly within tRPC routers, keeping the architecture simple and focused:
+
+```typescript
+// src/server/api/routers/post.ts
+export const postRouter = createTRPCRouter({
+  all: publicProcedure.query(async ({ ctx }) => {
+    // Business logic directly in the router
+    return await ctx.db.post.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+  }),
+  
+  create: protectedProcedure
+    .input(z.object({ title: z.string(), content: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Business logic and validation
+      return await ctx.db.post.create({
+        data: {
+          title: input.title,
+          content: input.content,
+          authorId: ctx.session.user.id,
+        },
+      });
+    }),
+});
+```
+
+**Benefits of this approach:**
+- **Simpler architecture** - No additional abstraction layer
+- **Direct database access** - Business logic has immediate access to Prisma client
+- **Easy testing** - Test the entire procedure including business logic
+- **Type safety** - Full end-to-end type safety with tRPC
+
+**When to consider services:**
+- Complex business logic that spans multiple routers
+- Logic that needs to be reused across different procedures
+- Heavy computational operations that benefit from separation
 
 ## Testing Strategy
 
 ### Vitest Configuration
 
-The project uses Vitest with a multi-environment setup, where tests in `src/server` run in `node` and `src/app` run in `jsdom`.
+The project uses Vitest with a multi-environment setup:
+
+- **Server tests** (`src/server/**/*.test.ts`): Run in `node` environment
+- **App tests** (`src/app/**/*.test.{ts,tsx}`): Run in `jsdom` environment with React setup
+
+### Transactional Testing
+
+The application uses transactional testing for database operations using `@chax-at/transactional-prisma-testing`. This approach:
+
+1. **Wraps each test in a transaction** - Database changes are isolated
+2. **Automatically rolls back** - No test data persists between tests
+3. **Provides realistic testing** - Tests run against actual database operations
+4. **Ensures test isolation** - No cross-test contamination
+
+```typescript
+// src/server/db/__mocks__/index.ts
+import { PrismaTestingHelper } from "@chax-at/transactional-prisma-testing";
+
+const prismaTestingHelper = new PrismaTestingHelper(originalPrismaClient);
+export const db = prismaTestingHelper.getProxyClient();
+
+beforeEach(async () => {
+  await prismaTestingHelper.startNewTransaction();
+});
+
+afterEach(() => {
+  prismaTestingHelper?.rollbackCurrentTransaction();
+});
+```
 
 ### Testing Patterns
 
-#### Server-Side Testing
+#### Server-Side Testing (Transactional)
 
-If you want more of an integration-type testing, you can have something like this:
-
-```typescript
-import { describe, it, expect } from "vitest";
-import z from "zod";
-import { exampleService } from ".";
-
-describe("ExampleService", () => {
-  it("should return a random uuid", async () => {
-    const result = await exampleService.getExample();
-    expect(result).toHaveLength(1);
-    expect(result[0]?.id).toBeDefined();
-    expect(() => z.string().uuid().parse(result[0]?.id)).not.toThrow();
-  });
-});
-```
-
-However if you want more of a unit test type of scenario,
-you can rely on `vitest-mock-extended`
+For integration testing with real database operations:
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { ExampleService } from ".";
-import { mockDeep } from "vitest-mock-extended";
-import type { PrismaClient } from "@prisma/client";
+import { createCaller } from "~/server/api/root";
+import { db } from "~/server/db/__mocks__";
 
-describe("ExampleService", () => {
-  it("should return a random uuid", async () => {
-    const id = "123e4567-e89b-12d3-a456-426614174000";
-    const db = mockDeep<PrismaClient>();
-    db.$queryRaw.mockResolvedValue([{ id }]);
-    const service = new ExampleService(db);
-    const result = await service.getExample();
-
-    expect(result).toEqual([{ id }]);
+describe("Post Router", () => {
+  it("should create and retrieve posts", async () => {
+    const caller = createCaller({ db, session: null, headers: new Headers() });
+    
+    // This runs in a transaction and gets rolled back
+    const created = await caller.post.create({ 
+      title: "Test Post", 
+      content: "Test Content" 
+    });
+    const allPosts = await caller.post.all();
+    
+    expect(allPosts).toHaveLength(1);
+    expect(allPosts[0]).toEqual(created);
   });
 });
 ```
 
-For cases where dependency injection is not easy, you can use `vi.mock`:
+#### Component Testing
+
+**UI Testing Strategy**: Manual testing is preferred for complex UI components. Only test stateless components that are easy to test:
 
 ```typescript
-import { describe, it, expect, vi } from "vitest";
-import { exampleService } from ".";
-import { db } from "~/server/db";
+// Only test simple, stateless components
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { SimpleComponent } from "./SimpleComponent";
 
-vi.mock("~/server/db");
-
-describe("ExampleService", () => {
-  it("should return a random uuid", async () => {
-    const id = "123e4567-e89b-12d3-a456-426614174000";
-    vi.mocked(db.$queryRaw).mockResolvedValue([{ id }]);
-    const result = await exampleService.getExample();
-
-    expect(result).toEqual([{ id }]);
+describe("SimpleComponent", () => {
+  it("should render with correct text", () => {
+    render(<SimpleComponent text="Hello" />);
+    expect(screen.getByText("Hello")).toBeInTheDocument();
   });
 });
 ```
+
+**What to Skip**:
+- Complex UI interactions
+- Form validation flows
+- Animation and visual effects
+- Integration with external libraries
+
+**What to Test**:
+- Utility functions
+- Data transformation logic
+- Simple presentational components
+- Business logic in services
+
+### Testing Best Practices
+
+1. **Use transactional testing** for database operations in tRPC procedures
+2. **Test procedures end-to-end** using `createCaller` for realistic testing
+3. **Mock external dependencies** for unit tests when needed
+4. **Test business logic** directly in the procedures where it lives
+5. **Keep component tests simple** and focused on rendering
+6. **Use integration tests** for critical user flows through tRPC
+7. **Prefer manual testing** for complex UI interactions
 

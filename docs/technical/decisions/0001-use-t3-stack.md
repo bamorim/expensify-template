@@ -32,15 +32,19 @@ pnpm create t3-app@latest expensify --CI --prisma --tailwind --dbProvider postgr
 5. **pnpm**: Fast package manager that stays close to the Node.js ecosystem (avoided Bun to maintain familiarity)
 6. **Tailwind CSS**: Utility-first CSS framework for rapid UI development
 7. **ESLint**: Code quality and consistency
+8. **tRPC**: End-to-end type-safe APIs with TanStack Query integration for client-server communication
+9. **NextAuth**: Authentication framework for Next.js with session management integrated into tRPC context
 
 ## Consequences
 
 ### Positive:
 - **AI Agent Friendly**: The stack uses widely known technologies that AI agents can easily understand and work with
-- **Type Safety**: Full-stack type safety from database to UI
+- **Type Safety**: Full-stack type safety from database to UI through tRPC
 - **Rapid Development**: Server components eliminate the need for a separate API layer, reducing context complexity
 - **LLM-Friendly Schema**: Prisma's schema definition is clear and easy for LLMs to understand and modify
 - **Familiar Ecosystem**: Stays within the Node.js ecosystem while using modern tooling
+- **Seamless Client-Server**: tRPC provides type-safe API calls without manual type definitions
+- **Integrated Auth**: NextAuth seamlessly integrates with tRPC context for protected procedures
 
 ### Trade-offs:
 - **Learning Curve**: Team needs to understand the integrated stack rather than individual technologies
@@ -49,3 +53,4 @@ pnpm create t3-app@latest expensify --CI --prisma --tailwind --dbProvider postgr
 ### Risks:
 - **Complexity**: While simpler than a custom setup, still requires understanding multiple integrated technologies
 - **Server vs Client segregation**: Server components while useful makes it easy to mix client and server code in ways that could impact performance and security if not carefully managed - sensitive data or operations could accidentally be exposed to the client
+- **Testing Complexity**: Transactional testing with tRPC requires understanding the testing helper patterns

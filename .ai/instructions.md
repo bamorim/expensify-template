@@ -56,8 +56,8 @@ When making architectural decisions:
 - **Code Quality**: ESLint + Prettier
 
 ## Development Patterns
-- **Domain Layer**: Domain-driven design with services in `src/server/services/` where each service is a Class that receives it's dependencies and expose an API to be used elsewhere
-- **Testing**: Unit tests alongside service files (`*.test.ts`)
+- **API Layer**: tRPC routers with business logic organized directly in procedures
+- **Testing**: Unit tests alongside router files (`*.test.ts`) using transactional testing
 - **Type Safety**: Full TypeScript support with Zod for runtime validation
 
 ## Code Standards
@@ -79,10 +79,11 @@ When making architectural decisions:
 - **Input Validation**: Zod schemas for all user inputs
 
 ## Testing Strategy
-- **Unit Tests**: Test individual service methods and components
-- **Integration Tests**: Test service interactions and API endpoints
-- **Test Coverage**: Aim for high coverage of business logic
-- **Mock Strategy**: Use `vitest-mock-extended` for Prisma mocking
+- **Unit Tests**: Test individual tRPC procedures and components
+- **Integration Tests**: Test procedures end-to-end using `createCaller` with transactional testing
+- **Test Coverage**: Aim for high coverage of business logic in procedures
+- **Mock Strategy**: Use `vitest-mock-extended` for Prisma mocking when needed
+- **Transactional Testing**: Use `@chax-at/transactional-prisma-testing` for database operations
 
 ## Performance Requirements
 - **Page Load**: <2 seconds for all pages
